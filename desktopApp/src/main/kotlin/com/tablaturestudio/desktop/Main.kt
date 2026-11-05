@@ -142,7 +142,7 @@ private fun StudioApp() {
                 }
                 Spacer(Modifier.height(12.dp))
                 val barTicks = remember(score) { MidiScoreCompiler.measureStartTicks(score) }
-                val currentBar = remember(position, barTicks) {
+                val currentBar = remember(position, barTicks.toList()) {
                     barTicks.indexOfLast { it <= position }.coerceAtLeast(0)
                 }
                 TabCanvas(score.tracks[selectedTrack], zoom, currentBar, player?.isPlaying == true, position, barTicks.toList())
@@ -408,20 +408,31 @@ private fun TabCanvas(
                                             .coerceIn(0.05f, 0.94f)
                                         val x = (measureWidthPx / pixelDensity * relative).dp
                                         val y = staffTop + (note.y / TabLayoutEngine.STRING_SPACING) * staffSpacing
+                                        // EN: A fret label must not cover the label on the adjacent string.
+                                        // Each string is only 15.dp apart, so the old 21.dp square
+                                        // background caused overlapping white blocks in chords.
+                                        // ES: El fondo del traste no debe tapar el número de otra cuerda.
+                                        // Las cuerdas están a 15.dp, y el fondo anterior de 21.dp
+                                        // se superponía cuando había acordes.
+                                        val fretLabel = note.fret.toString()
+                                        val labelWidth = if (fretLabel.length > 1) 21.dp else 14.dp
                                         Box(
-                                            Modifier.offset(x = x - 10.dp, y = y - 10.dp)
-                                                .size(21.dp)
-                                                .background(
-                                                    if (active) Color(0xFFECE6FB) else paper
-                                                ),
+                                            modifier = Modifier
+                                                .offset(x = x - labelWidth / 2, y = y - 7.dp)
+                                                .width(labelWidth)
+                                                .height(14.dp)
+                                                .background(if (active) Color(0xFFECE6FB) else paper),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                note.fret.toString(),
+                                                text = fretLabel,
                                                 color = if (active) selected else ink,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                textAlign = TextAlign.Center
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                lineHeight = 13.sp
                                             )
                                         }
                                     }
