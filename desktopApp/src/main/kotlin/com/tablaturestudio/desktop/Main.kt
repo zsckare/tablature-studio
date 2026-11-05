@@ -13,6 +13,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.*
 import com.tablaturestudio.core.*
 import com.tablaturestudio.importer.*
@@ -109,7 +117,37 @@ private fun StudioApp() {
     val subtle = Color(0xFF9CAFC5)
     val selectedColor = Color(0xFF344761)
     val currentTrack = score.tracks[selectedTrack]
-    Column(Modifier.fillMaxSize().background(background).padding(14.dp),
+    // EN: Focus the workspace once, so keyboard playback works without clicking.
+    // ES: Enfocar el espacio de trabajo para usar atajos sin hacer clic.
+    val workspaceFocus = remember { FocusRequester() }
+    LaunchedEffect(workspaceFocus) { workspaceFocus.requestFocus() }
+    Column(
+        Modifier.fillMaxSize()
+            .focusRequester(workspaceFocus)
+            .onPreviewKeyEvent { event ->
+                // EN: Only respond once per press; KeyUp must not toggle playback.
+                // ES: Responder solo al presionar; soltar la tecla no debe alternar reproducción.
+                if (event.type != KeyEventType.KeyDown || player == null) {
+                    false
+                } else {
+                    when (event.key) {
+                        Key.Spacebar -> {
+                            try {
+                                if (player.isPlaying) player.pause() else player.play()
+                            } catch (e: Exception) { playbackError = "Playback error: ${e.message}" }
+                            true
+                        }
+                        Key.Escape -> {
+                            player.stop()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
+            .focusable()
+            .background(background)
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // EN: Application toolbar. ES: Barra de herramientas principal.
         Row(Modifier.fillMaxWidth().height(52.dp).background(panel).padding(horizontal = 14.dp),
@@ -126,7 +164,7 @@ private fun StudioApp() {
                 message = "Demo score loaded"
             }) { Text("Demo") }
             Spacer(Modifier.weight(1f))
-            Text("NATIVE  •  OFFLINE", color = subtle, fontSize = 11.sp)
+            Text("SPACE  Play / Pause    ·    ESC  Stop", color = subtle, fontSize = 11.sp)
         }
         // EN: Project header and compact transport.
         // ES: Cabecera del proyecto y controles principales de reproducción.
