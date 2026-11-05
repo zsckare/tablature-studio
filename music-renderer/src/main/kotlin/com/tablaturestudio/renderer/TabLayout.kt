@@ -16,9 +16,15 @@ object TabLayoutEngine {
         val measures = track.measures.mapIndexed { index, measure ->
             val left = index * MEASURE_WIDTH
             val beatCount = measure.beats.size.coerceAtLeast(1)
+            val measureLength = measure.signature.numerator.toDouble() / measure.signature.denominator
+            var cumulative = 0.0
             val notes = measure.beats.flatMapIndexed { beatIndex, beat ->
+                val onset = beat.onset ?: cumulative
+                if (beat.onset == null) cumulative += beat.duration?.asWholeNotes() ?: 0.25
+                val fraction = if (beat.onset == null && measureLength <= 0.0)
+                    (beatIndex + 0.5) / beatCount else (onset / measureLength).coerceIn(0.0, 1.0)
                 beat.notes.map { note ->
-                    PositionedNote(left + (beatIndex + .5f) * MEASURE_WIDTH / beatCount,
+                    PositionedNote(left + (12f + fraction.toFloat() * (MEASURE_WIDTH - 24f)),
                         (note.string - 1) * STRING_SPACING, note.fret)
                 }
             }

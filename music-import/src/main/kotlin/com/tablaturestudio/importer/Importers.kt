@@ -47,18 +47,11 @@ class AsciiTabImporter : ScoreImporter {
     }
 }
 
-/** EN: MusicXML importer placeholder; never silently accepts unsupported files.
- * ES: Importador MusicXML pendiente; nunca acepta archivos no soportados.
- */
-class MusicXmlImporter : ScoreImporter {
-    override val extensions = setOf("musicxml", "xml")
-    override fun import(bytes: ByteArray) = ImportResult.Failure("MusicXML support is planned; this build supports ASCII TAB")
-}
-
-class ImportRegistry(private val importers: List<ScoreImporter> = listOf(AsciiTabImporter(), MusicXmlImporter())) {
+class ImportRegistry(private val importers: List<ScoreImporter> = listOf(AsciiTabImporter(), MusicXmlImporter(), GuitarProImporter())) {
     fun open(filename: String, bytes: ByteArray): ImportResult {
         val extension = filename.substringAfterLast('.', "").lowercase()
         return importers.firstOrNull { extension in it.extensions }?.import(bytes)
             ?: ImportResult.Failure("Unsupported format: .$extension")
     }
 }
+
