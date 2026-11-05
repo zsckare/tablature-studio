@@ -80,168 +80,253 @@ private fun StudioApp() {
         } catch (e: Exception) { playbackError = "Audio error: ${e.message}" }
     }
     LaunchedEffect(player) { loadPlayback(score) }
-    Column(Modifier.fillMaxSize().background(background).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("TABLATURE STUDIO", fontWeight = FontWeight.Bold, color = accent)
-            Button(onClick = {
-                val dialog = FileDialog(null as Frame?, "Open tablature", FileDialog.LOAD)
-                dialog.isVisible = true
-                val filename = dialog.file
-                if (filename != null) {
-                    val file = File(dialog.directory, filename)
-                    try {
-                        when (val result = registry.open(file.name, file.readBytes())) {
-                            is ImportResult.Success -> { score = result.score; selectedTrack = 0; loadPlayback(score); message = "Opened ${file.name}" }
-                            is ImportResult.Failure -> message = result.message
-                        }
-                    } catch (e: Exception) { message = "Could not open file: ${e.message}" }
+    // EN: Desktop workspace shell. The score renderer below remains unchanged.
+    // ES: Contenedor del estudio. El renderizador de partituras permanece intacto.
+    val barTicks = remember(score) { MidiScoreCompiler.measureStartTicks(score) }
+    val currentBar = remember(position, score) {
+        barTicks.indexOfLast { it <= position }.coerceAtLeast(0)
+    }
+    fun openScore() {
+        val dialog = FileDialog(null as Frame?, "Open tablature", FileDialog.LOAD)
+        dialog.isVisible = true
+        dialog.file?.let { name ->
+            val file = File(dialog.directory, name)
+            try {
+                when (val result = registry.open(file.name, file.readBytes())) {
+                    is ImportResult.Success -> {
+                        score = result.score
+                        selectedTrack = 0
+                        loadPlayback(score)
+                        message = "Opened ${file.name}"
+                    }
+                    is ImportResult.Failure -> message = result.message
                 }
-            }) { Text("Open file") }
-            OutlinedButton(onClick = { score = DemoScore.create(); selectedTrack = 0; loadPlayback(score); message = "Demo score loaded" }) { Text("Demo") }
+            } catch (e: Exception) { message = "Could not open file: ${e.message}" }
+        }
+    }
+    val panel = Color(0xFF1C2635)
+    val elevated = Color(0xFF263347)
+    val subtle = Color(0xFF9CAFC5)
+    val selectedColor = Color(0xFF344761)
+    val currentTrack = score.tracks[selectedTrack]
+    Column(Modifier.fillMaxSize().background(background).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // EN: Application toolbar. ES: Barra de herramientas principal.
+        Row(Modifier.fillMaxWidth().height(52.dp).background(panel).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("◈", color = accent, fontSize = 23.sp)
+            Text("TABLATURE STUDIO", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+            Spacer(Modifier.width(12.dp))
+            Button(onClick = ::openScore) { Text("Open file") }
+            OutlinedButton(onClick = {
+                score = DemoScore.create()
+                selectedTrack = 0
+                loadPlayback(score)
+                message = "Demo score loaded"
+            }) { Text("Demo") }
             Spacer(Modifier.weight(1f))
-            Text("Offline · Native Kotlin", color = Color.LightGray, fontSize = 12.sp)
+            Text("NATIVE  •  OFFLINE", color = subtle, fontSize = 11.sp)
         }
-        Spacer(Modifier.height(18.dp))
-        Text(score.title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-        Text(score.artist.orEmpty(), color = Color.LightGray)
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.width(225.dp).fillMaxHeight().background(surface)
-                .verticalScroll(rememberScrollState()).padding(12.dp)) {
-                Text("TRACKS", color = accent, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
+        // EN: Project header and compact transport.
+        // ES: Cabecera del proyecto y controles principales de reproducción.
+        Column(Modifier.fillMaxWidth().background(panel).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(score.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp,
+                        maxLines = 1)
+                    Text(score.artist?.takeIf { it.isNotBlank() } ?: "Untitled artist",
+                        color = subtle, fontSize = 12.sp, maxLines = 1)
+                }
+                Text("${score.tempo} BPM", color = accent, fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold)
+                Text("BAR ${currentBar + 1}", color = subtle, fontSize = 12.sp)
+                Button(enabled = player != null, onClick = {
+                    try { player?.play() } catch (e: Exception) { playbackError = e.message }
+                }) { Text("▶ Play") }
+                OutlinedButton(enabled = player != null, onClick = { player?.pause() }) { Text("Ⅱ Pause") }
+                OutlinedButton(enabled = player != null, onClick = { player?.stop() }) { Text("■ Stop") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("POSITION", color = subtle, fontSize = 10.sp)
+                Slider(
+                    value = if (length > 0) (position.toFloat() / length).coerceIn(0f, 1f) else 0f,
+                    onValueChange = { player?.seekTo((it * length).toLong()) },
+                    enabled = player != null && length > 0,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("${position / MidiScoreCompiler.PPQ} / ${length / MidiScoreCompiler.PPQ} beats",
+                    color = subtle, fontSize = 11.sp)
+            }
+        }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // EN: Scrollable track inspector with real playback controls.
+            // ES: Inspector desplazable de pistas con controles de reproducción reales.
+            Column(Modifier.width(245.dp).fillMaxHeight().background(panel)
+                .verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("INSTRUMENTS  ·  ${score.tracks.size}",
+                    color = accent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 score.tracks.forEachIndexed { index, track ->
-                    TextButton(onClick = { selectedTrack = index }, modifier = Modifier.fillMaxWidth()) {
-                        Text(track.name, color = if (index == selectedTrack) accent else Color.White)
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .background(if (index == selectedTrack) selectedColor else elevated)
+                            .clickable { selectedTrack = index }
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text("${index + 1}. ${track.name}", color = Color.White,
+                            fontWeight = if (index == selectedTrack) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 12.sp)
+                        Text(track.tuning.joinToString(" · ") { midiPitchLabel(it) },
+                            color = subtle, fontSize = 10.sp, maxLines = 1)
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            OutlinedButton(enabled = player != null, onClick = {
+                                val next = index !in muted
+                                player?.setTrackMuted(index, next)
+                                muted = if (next) muted + index else muted - index
+                            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(32.dp)) {
+                                Text(if (index in muted) "Unmute" else "Mute", fontSize = 10.sp)
+                            }
+                            OutlinedButton(enabled = player != null, onClick = {
+                                val next = index !in solo
+                                player?.setTrackSolo(index, next)
+                                solo = if (next) solo + index else solo - index
+                            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(32.dp)) {
+                                Text(if (index in solo) "Unsolo" else "Solo", fontSize = 10.sp)
+                            }
+                        }
+                        Slider(value = trackVolumes[index] ?: 95f, onValueChange = { volume ->
+                            trackVolumes = trackVolumes + (index to volume)
+                            player?.setTrackVolume(index, volume.toInt())
+                        }, valueRange = 0f..127f, enabled = player != null,
+                            modifier = Modifier.height(24.dp))
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedButton(enabled = player != null, onClick = {
-                            val next = index !in muted
-                            player?.setTrackMuted(index, next)
-                            muted = if (next) muted + index else muted - index
-                        }) { Text(if (index in muted) "Unmute" else "Mute", fontSize = 10.sp) }
-                        OutlinedButton(enabled = player != null, onClick = {
-                            val next = index !in solo
-                            player?.setTrackSolo(index, next)
-                            solo = if (next) solo + index else solo - index
-                        }) { Text(if (index in solo) "Unsolo" else "Solo", fontSize = 10.sp) }
-                    }
-                    Slider(value = trackVolumes[index] ?: 95f, onValueChange = { volume ->
-                        trackVolumes = trackVolumes + (index to volume)
-                        player?.setTrackVolume(index, volume.toInt())
-                    }, valueRange = 0f..127f, enabled = player != null)
                 }
             }
-            Column(Modifier.weight(1f).fillMaxHeight().background(surface).padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${score.tracks[selectedTrack].name} · ${score.tracks[selectedTrack].tuning.size} strings", color = Color.White)
-                    Spacer(Modifier.weight(1f))
-                    OutlinedButton(onClick = { zoom = (zoom - .2f).coerceAtLeast(.6f) }) { Text("−") }
-                    Text(" ${(zoom * 100).toInt()}% ", color = Color.White)
-                    OutlinedButton(onClick = { zoom = (zoom + .2f).coerceAtMost(2.4f) }) { Text("+") }
+            // EN: Score viewer is invoked exactly as before; no changes to TabCanvas.
+            // ES: Se invoca el visor original sin modificar TabCanvas.
+            Column(Modifier.weight(1f).fillMaxHeight().background(panel).padding(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(currentTrack.name, color = Color.White, fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp, maxLines = 1)
+                        Text("${currentTrack.tuning.size} strings · ${currentTrack.measures.size} measures",
+                            color = subtle, fontSize = 11.sp)
+                    }
+                    OutlinedButton(onClick = { zoom = (zoom - .2f).coerceAtLeast(.6f) },
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(34.dp)) { Text("−") }
+                    Text("${(zoom * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                    OutlinedButton(onClick = { zoom = (zoom + .2f).coerceAtMost(2.4f) },
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(34.dp)) { Text("+") }
                 }
-                Spacer(Modifier.height(12.dp))
-                val barTicks = remember(score) { MidiScoreCompiler.measureStartTicks(score) }
-                val currentBar = remember(position, barTicks.toList()) {
-                    barTicks.indexOfLast { it <= position }.coerceAtLeast(0)
-                }
-                TabCanvas(score.tracks[selectedTrack], zoom, currentBar, player?.isPlaying == true, position, barTicks.toList())
+                Spacer(Modifier.height(8.dp))
+                TabCanvas(currentTrack, zoom, currentBar, player?.isPlaying == true,
+                    position, barTicks.toList())
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Position", color = Color.LightGray, fontSize = 12.sp)
-            Slider(value = if (length > 0) (position.toFloat() / length).coerceIn(0f, 1f) else 0f,
-                onValueChange = { player?.seekTo((it * length).toLong()) },
-                enabled = player != null && length > 0, modifier = Modifier.weight(1f))
-            Text("${position / MidiScoreCompiler.PPQ} / ${length / MidiScoreCompiler.PPQ} beats",
-                color = Color.LightGray, fontSize = 12.sp)
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth().background(surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(enabled = player != null, onClick = {
-                try { player?.play() } catch (e: Exception) { playbackError = e.message }
-            }) { Text("Play") }
-            Spacer(Modifier.width(6.dp))
-            OutlinedButton(enabled = player != null, onClick = { player?.pause() }) { Text("Pause") }
-            Spacer(Modifier.width(6.dp))
-            OutlinedButton(enabled = player != null, onClick = { player?.stop() }) { Text("Stop") }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(enabled = player != null, onClick = {
-                speed = (speed - 0.25).coerceAtLeast(0.25)
-                player?.setTempoMultiplier(speed)
-            }) { Text("−") }
-            Text("${(speed * 100).toInt()}%", color = Color.White)
-            OutlinedButton(enabled = player != null, onClick = {
-                speed = (speed + 0.25).coerceAtMost(2.0)
-                player?.setTempoMultiplier(speed)
-            }) { Text("+") }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(enabled = player != null && length > 1, onClick = {
-                if (loopEnabled) {
+        // EN: Secondary transport and practice tools.
+        // ES: Herramientas secundarias de transporte y práctica.
+        Column(Modifier.fillMaxWidth().background(panel).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text("SPEED", color = subtle, fontSize = 11.sp)
+                OutlinedButton(enabled = player != null, onClick = {
+                    speed = (speed - .25).coerceAtLeast(.25)
+                    player?.setTempoMultiplier(speed)
+                }, contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.height(32.dp)) { Text("−") }
+                Text("${(speed * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                OutlinedButton(enabled = player != null, onClick = {
+                    speed = (speed + .25).coerceAtMost(2.0)
+                    player?.setTempoMultiplier(speed)
+                }, contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.height(32.dp)) { Text("+") }
+                OutlinedButton(enabled = player != null && length > 1, onClick = {
+                    if (loopEnabled) {
+                        player?.clearLoop()
+                        loopEnabled = false
+                    } else {
+                        val start = (position / MidiScoreCompiler.PPQ) * MidiScoreCompiler.PPQ
+                        val end = (start + 4L * MidiScoreCompiler.PPQ).coerceAtMost(length)
+                        if (end > start) {
+                            player?.setLoop(start, end)
+                            loopEnabled = true
+                            message = "Loop enabled: 4 beats from current position"
+                        }
+                    }
+                }, modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)) {
+                    Text(if (loopEnabled) "Loop off" else "Loop 4 beats", fontSize = 11.sp)
+                }
+                OutlinedButton(enabled = player != null, onClick = {
+                    metronome = !metronome
+                    player?.setMetronome(metronome)
+                }, modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)) {
+                    Text(if (metronome) "Metronome on" else "Metronome off", fontSize = 11.sp)
+                }
+                Spacer(Modifier.weight(1f))
+                OutlinedButton(enabled = player != null, onClick = {
+                    val dialog = FileDialog(null as Frame?, "Load SoundFont (.sf2)", FileDialog.LOAD)
+                    dialog.isVisible = true
+                    dialog.file?.let { name ->
+                        try {
+                            message = if (player?.loadSoundFont(File(dialog.directory, name)) == true)
+                                "SoundFont loaded" else "SoundFont unsupported by MIDI synthesizer"
+                        } catch (e: Exception) { playbackError = "SoundFont error: ${e.message}" }
+                    }
+                }, modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)) { Text("SF2", fontSize = 11.sp) }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                OutlinedButton(enabled = player != null, onClick = {
+                    loopStart = position
+                    message = "A set at beat ${position / MidiScoreCompiler.PPQ}"
+                }, modifier = Modifier.height(32.dp)) { Text("Set A", fontSize = 11.sp) }
+                OutlinedButton(enabled = player != null && length > 0, onClick = {
+                    if (position > loopStart) {
+                        player?.setLoop(loopStart, position)
+                        loopEnabled = true
+                        message = "A/B loop enabled"
+                    } else message = "Move after A before setting B"
+                }, modifier = Modifier.height(32.dp)) { Text("Set B / Loop", fontSize = 11.sp) }
+                OutlinedButton(enabled = player != null, onClick = {
                     player?.clearLoop()
                     loopEnabled = false
-                } else {
-                    val start = (position / MidiScoreCompiler.PPQ) * MidiScoreCompiler.PPQ
-                    val end = (start + 4L * MidiScoreCompiler.PPQ).coerceAtMost(length)
-                    if (end > start) {
-                        player?.setLoop(start, end)
-                        loopEnabled = true
-                        message = "Loop enabled: 4 beats from current position"
+                    message = "Loop cleared"
+                }, modifier = Modifier.height(32.dp)) { Text("Clear loop", fontSize = 11.sp) }
+                Spacer(Modifier.weight(1f))
+                OutlinedButton(onClick = {
+                    val dialog = FileDialog(null as Frame?, "Export MIDI", FileDialog.SAVE)
+                    dialog.file = score.title.replace(Regex("[^A-Za-z0-9 _-]"), "_") + ".mid"
+                    dialog.isVisible = true
+                    dialog.file?.let { filename ->
+                        try {
+                            val target = File(dialog.directory, filename)
+                            javax.sound.midi.MidiSystem.write(
+                                MidiScoreCompiler.compile(score), 1, target)
+                            message = "MIDI exported: ${target.name}"
+                        } catch (e: Exception) { message = "MIDI export failed: ${e.message}" }
                     }
-                }
-            }) { Text(if (loopEnabled) "Loop off" else "Loop 4 beats") }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(enabled = player != null, onClick = {
-                val dialog = FileDialog(null as Frame?, "Load SoundFont (.sf2)", FileDialog.LOAD)
-                dialog.isVisible = true
-                dialog.file?.let { name ->
-                    try {
-                        message = if (player?.loadSoundFont(File(dialog.directory, name)) == true) "SoundFont loaded" else "SoundFont unsupported by MIDI synthesizer"
-                    } catch (e: Exception) { playbackError = "SoundFont error: ${e.message}" }
-                }
-            }) { Text("SF2") }
-            Spacer(Modifier.width(12.dp))
-            Text(playbackError ?: message, color = Color.LightGray, fontSize = 12.sp)
+                }, modifier = Modifier.height(32.dp)) { Text("Export MIDI", fontSize = 11.sp) }
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth().background(surface).padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = player != null, onClick = {
-                loopStart = position
-                message = "A set at beat ${position / MidiScoreCompiler.PPQ}"
-            }) { Text("Set A") }
-            OutlinedButton(enabled = player != null && length > 0, onClick = {
-                if (position > loopStart) {
-                    player?.setLoop(loopStart, position)
-                    loopEnabled = true
-                    message = "A/B loop enabled"
-                } else message = "Move after A before setting B"
-            }) { Text("Set B / Loop") }
-            OutlinedButton(enabled = player != null, onClick = {
-                player?.clearLoop()
-                loopEnabled = false
-                message = "Loop cleared"
-            }) { Text("Clear loop") }
-            OutlinedButton(enabled = player != null, onClick = {
-                metronome = !metronome
-                player?.setMetronome(metronome)
-            }) { Text(if (metronome) "Metronome on" else "Metronome off") }
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = {
-                val dialog = FileDialog(null as Frame?, "Export MIDI", FileDialog.SAVE)
-                dialog.file = score.title.replace(Regex("[^A-Za-z0-9 _-]"), "_") + ".mid"
-                dialog.isVisible = true
-                dialog.file?.let { filename ->
-                    try {
-                        val target = File(dialog.directory, filename)
-                        javax.sound.midi.MidiSystem.write(
-                            MidiScoreCompiler.compile(score), 1, target)
-                        message = "MIDI exported: ${target.name}"
-                    } catch (e: Exception) { message = "MIDI export failed: ${e.message}" }
-                }
-            }) { Text("Export MIDI") }
+        Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(playbackError ?: message, color = if (playbackError != null) Color(0xFFFF9B9B) else subtle,
+                fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f))
+            Text("Measure ${currentBar + 1} / ${currentTrack.measures.size}",
+                color = subtle, fontSize = 11.sp)
         }
     }
 }
