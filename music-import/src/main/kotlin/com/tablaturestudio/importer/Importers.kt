@@ -47,7 +47,7 @@ class AsciiTabImporter : ScoreImporter {
     }
 }
 
-class ImportRegistry(private val importers: List<ScoreImporter> = listOf(AsciiTabImporter(), MusicXmlImporter(), GuitarProImporter())) {
+class ImportRegistry(private val importers: List<ScoreImporter> = listOf(AsciiTabImporter(), MusicXmlImporter(), GuitarProImporter(), GuitarProGpImporter())) {
     fun open(filename: String, bytes: ByteArray): ImportResult {
         val extension = filename.substringAfterLast('.', "").lowercase()
         return importers.firstOrNull { extension in it.extensions }?.import(bytes)
