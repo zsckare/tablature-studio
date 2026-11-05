@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.*
 import com.tablaturestudio.core.*
 import com.tablaturestudio.importer.*
@@ -246,56 +247,258 @@ private fun StudioApp() {
 }
 
 /**
- * EN: Virtualized native Compose tab renderer. Only visible measures create text overlays.
- * ES: Renderizador Compose virtualizado: solo dibuja los compases visibles.
+ * EN: Sheet-music layout inspired by MuseScore: responsive rows of measures on paper.
+ * ES: Diseño de partitura inspirado en MuseScore: filas adaptables de compases sobre papel.
+ *
+ * EN: Uses only native Compose drawing; it does not use WebView.
+ * ES: Utiliza únicamente dibujo nativo Compose, sin WebView.
  */
 @Composable
 private fun TabCanvas(track: Track, zoom: Float, currentMeasure: Int, playing: Boolean) {
     val layout = remember(track) { TabLayoutEngine.layout(track) }
-    val listState = rememberLazyListState()
-    LaunchedEffect(currentMeasure, playing, track) {
-        if (playing && currentMeasure in layout.measures.indices &&
-            currentMeasure != listState.firstVisibleItemIndex) {
-            listState.animateScrollToItem(currentMeasure)
+    val paper = Color(0xFFFFFEFA)
+    val ink = Color(0xFF263242)
+    val staffColor = Color(0xFF8C95A2)
+    val selected = Color(0xFF6E55BB)
+    val state = rememberLazyListState()
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF303947))) {
+        // EN: Fit complete systems to the available width, with no horizontal scroll.
+        // ES: Ajustar los sistemas al ancho disponible, sin desplazamiento horizontal.
+        val pagePadding = 36.dp
+        val usableWidth = (maxWidth - pagePadding * 2 - 92.dp).coerceAtLeast(180.dp)
+        val targetMeasureWidth = 205.dp * zoom
+        val measuresPerSystem = (usableWidth.value / targetMeasureWidth.value).toInt().coerceIn(1, 5)
+        val systems = remember(layout, measuresPerSystem) { layout.measures.chunked(measuresPerSystem) }
+        val activeSystem = (currentMeasure / measuresPerSystem).coerceIn(0, (systems.size - 1).coerceAtLeast(0))
+
+        LaunchedEffect(activeSystem, playing, track, measuresPerSystem) {
+            if (playing && systems.isNotEmpty()) state.animateScrollToItem(activeSystem)
         }
-    }
-    LazyRow(state = listState, modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 8.dp)) {
-        items(layout.measures.size) { i ->
-            val measure = layout.measures[i]
-            val isCurrent = i == currentMeasure
-            val width = (measure.width * zoom).dp
-            val height = ((layout.height + 65f) * zoom).dp
-            Box(Modifier.width(width).height(height)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val scale = zoom * density
-                    val originY = 35f * density
-                    if (isCurrent) {
-                        drawRect(Color(0x22E0B676))
+
+        LazyColumn(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            items(systems.size) { systemIndex ->
+                val measures = systems[systemIndex]
+                val first = systemIndex == 0
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(paper)
+                        .padding(horizontal = pagePadding, vertical = 22.dp)
+                ) {
+                    if (first) {
+                        Text(track.name, color = ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "GUITAR TABLATURE  ·  ${track.tuning.size} STRINGS",
+                            color = Color(0xFF647183), fontSize = 10.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(Modifier.height(28.dp))
                     }
-                    for (s in 0 until layout.stringCount) {
-                        val y = originY + s * TabLayoutEngine.STRING_SPACING * scale
-                        drawLine(Color(0xFF728097), Offset(0f, y),
-                            Offset(measure.width * scale, y), 1.dp.toPx())
-                    }
-                    drawLine(Color(0xFFA3AFC1), Offset(0f, originY),
-                        Offset(0f, originY + layout.height * scale), 1.dp.toPx())
-                    if (i == layout.measures.lastIndex) {
-                        val x = measure.width * scale
-                        drawLine(Color(0xFFA3AFC1), Offset(x, originY),
-                            Offset(x, originY + layout.height * scale), 1.dp.toPx())
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Column(Modifier.width(54.dp).padding(top = 43.dp)) {
+                            Text("TAB", color = ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(Modifier.weight(1f)) {
+                            measures.forEachIndexed { index, measure ->
+                                val absolute = systemIndex * measuresPerSystem + index
+                                val active = absolute == currentMeasure
+                                BoxWithConstraints(
+                                    Modifier.weight(1f).height(310.dp * zoom)
+                                ) {
+                                    val measureWidthPx = constraints.maxWidth.toFloat()
+                                    val pixelDensity = LocalDensity.current.density
+                                    val staffTop = 198.dp * zoom
+                                    val staffSpacing = 15.dp * zoom
+                                    val staffHeight = staffSpacing * (layout.stringCount - 1)
+                                    Canvas(Modifier.fillMaxSize()) {
+                                        val top = staffTop.toPx()
+                                        val spacing = staffSpacing.toPx()
+                                        if (active) {
+                                            drawRect(
+                                                selected.copy(alpha = 0.11f),
+                                                topLeft = Offset(0f, top - 10.dp.toPx()),
+                                                size = androidx.compose.ui.geometry.Size(
+                                                    size.width, spacing * (layout.stringCount - 1) + 20.dp.toPx()
+                                                )
+                                            )
+                                        }
+                                        for (string in 0 until layout.stringCount) {
+                                            val y = top + string * spacing
+                                            drawLine(staffColor, Offset(0f, y), Offset(size.width, y), 0.85.dp.toPx())
+                                        }
+                                        drawLine(
+                                            ink, Offset(size.width - 1.dp.toPx(), top),
+                                            Offset(size.width - 1.dp.toPx(), top + staffHeight.toPx()),
+                                            1.dp.toPx()
+                                        )
+                                        if (index == 0) drawLine(
+                                            ink, Offset(0f, top),
+                                            Offset(0f, top + staffHeight.toPx()), 1.dp.toPx()
+                                        )
+                                    }
+                                    // EN: Conventional treble staff above the tablature, sharing the same measure.
+                                    // ES: Pentagrama en clave de sol sobre la tablatura, en el mismo compás.
+                                    StandardStaff(
+                                        measure = track.measures[absolute],
+                                        tuning = track.tuning,
+                                        active = active,
+                                        zoom = zoom,
+                                        modifier = Modifier.fillMaxWidth().height(175.dp * zoom)
+                                    )
+                                    Text(
+                                        "${measure.number}",
+                                        modifier = Modifier.offset(x = 7.dp, y = 5.dp),
+                                        color = if (active) selected else Color(0xFF657184),
+                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 11.sp
+                                    )
+                                    measure.notes.forEach { note ->
+                                        // EN: Scale each note's original position into the available measure width.
+                                        // ES: Escalar la posición original de cada nota al ancho disponible.
+                                        val relative = ((note.x - measure.x) / measure.width)
+                                            .coerceIn(0.05f, 0.94f)
+                                        val x = (measureWidthPx / pixelDensity * relative).dp
+                                        val y = staffTop + (note.y / TabLayoutEngine.STRING_SPACING) * staffSpacing
+                                        Box(
+                                            Modifier.offset(x = x - 10.dp, y = y - 10.dp)
+                                                .size(21.dp)
+                                                .background(
+                                                    if (active) Color(0xFFECE6FB) else paper
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                note.fret.toString(),
+                                                color = if (active) selected else ink,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                Text("${measure.number}", modifier = Modifier.offset(y = 5.dp),
-                    color = if (isCurrent) accent else Color.LightGray, fontSize = 11.sp)
-                measure.notes.forEach { note ->
-                    Box(Modifier.offset(x = ((note.x - measure.x) * zoom - 10).dp,
-                        y = (35 + note.y * zoom - 10).dp).size(20.dp)
-                        .background(if (isCurrent) Color(0xFF3A3540) else surface),
-                        contentAlignment = Alignment.Center) {
-                        Text(note.fret.toString(), color = Color.White, fontSize = 12.sp,
-                            textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+
+/**
+ * EN: Draw conventional pitches using the actual MIDI pitch (open-string tuning + fret).
+ * A treble clef is assumed for guitar; guitar sounds an octave lower than written.
+ * ES: Dibuja alturas musicales a partir del MIDI real (afinación + traste).
+ * Se usa clave de sol para guitarra, que suena una octava debajo de lo escrito.
+ */
+@Composable
+private fun StandardStaff(
+    measure: Measure,
+    tuning: List<Int>,
+    active: Boolean,
+    zoom: Float,
+    modifier: Modifier = Modifier
+) {
+    val ink = Color(0xFF27313F)
+    val lineColor = Color(0xFF737F8E)
+    val accidental = Color(0xFF6752B8)
+    BoxWithConstraints(modifier) {
+        val beats = measure.beats
+        val measureLength = measure.signature.numerator.toDouble() / measure.signature.denominator
+        val positions = remember(measure) {
+            var elapsed = 0.0
+            beats.map { beat ->
+                val start = beat.onset ?: elapsed
+                if (beat.onset == null) elapsed += beat.duration?.asWholeNotes() ?: 0.25
+                (start / measureLength).coerceIn(0.0, 1.0).toFloat() to beat
+            }
+        }
+        Canvas(Modifier.fillMaxSize()) {
+            val top = 46.dp.toPx() * zoom
+            val spacing = 12.dp.toPx() * zoom
+            val half = spacing / 2f
+            val left = 0f
+            val right = size.width
+            for (line in 0..4) {
+                val y = top + line * spacing
+                drawLine(lineColor, Offset(left, y), Offset(right, y), 0.85.dp.toPx())
+            }
+            drawLine(ink, Offset(right - 1.dp.toPx(), top),
+                Offset(right - 1.dp.toPx(), top + 4 * spacing), 1.dp.toPx())
+            // EN: Bottom treble line is E4 (MIDI 64), top line is F5.
+            // ES: Línea inferior: Mi4 (MIDI 64); línea superior: Fa5.
+            val naturalSemitones = intArrayOf(0, 2, 4, 5, 7, 9, 11)
+            fun diatonicIndex(pitch: Int): Int {
+                val octave = Math.floorDiv(pitch, 12) - 1
+                val semitone = Math.floorMod(pitch, 12)
+                val letter = naturalSemitones.indexOfLast { it <= semitone }.coerceAtLeast(0)
+                return octave * 7 + letter
+            }
+            val e4Index = 4 * 7 + 2
+            positions.forEach { (fraction, beat) ->
+                val x = (0.10f + fraction * 0.80f) * right
+                beat.notes.forEach { note ->
+                    val pitch = tuning.getOrNull(note.string - 1)?.plus(note.fret) ?: return@forEach
+                    // EN: Transpose guitar one octave up for standard written notation.
+                    // ES: Transponer guitarra una octava arriba para notación escrita estándar.
+                    val writtenPitch = pitch + 12
+                    val steps = diatonicIndex(writtenPitch) - e4Index
+                    val y = top + 4 * spacing - steps * half
+                    // EN: Ledger lines for pitches outside the five-line staff.
+                    // ES: Líneas adicionales para notas fuera del pentagrama.
+                    if (steps < 0) {
+                        for (step in -2 downTo steps step 2) {
+                            val ledgerY = top + 4 * spacing - step * half
+                            drawLine(ink, Offset(x - 11.dp.toPx(), ledgerY),
+                                Offset(x + 11.dp.toPx(), ledgerY), 0.8.dp.toPx())
+                        }
+                    } else if (steps > 8) {
+                        for (step in 10..steps step 2) {
+                            val ledgerY = top + 4 * spacing - step * half
+                            drawLine(ink, Offset(x - 11.dp.toPx(), ledgerY),
+                                Offset(x + 11.dp.toPx(), ledgerY), 0.8.dp.toPx())
+                        }
                     }
+                    drawOval(
+                        if (active) accidental else ink,
+                        topLeft = Offset(x - 6.dp.toPx(), y - 4.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 8.dp.toPx())
+                    )
+                    // EN: Basic stems. Rhythm engraving can be extended for beams/rests.
+                    // ES: Plicas básicas. El grabado rítmico podrá ampliarse para barras y silencios.
+                    drawLine(ink, Offset(x + 6.dp.toPx(), y),
+                        Offset(x + 6.dp.toPx(), y - 29.dp.toPx()), 1.2.dp.toPx())
+                }
+            }
+        }
+        // EN: Staff label, independent of installed music fonts.
+        // ES: Etiqueta del pentagrama, independiente de fuentes musicales.
+        Text(
+            "G", color = ink, fontWeight = FontWeight.Bold, fontSize = 16.sp,
+            modifier = Modifier.offset(x = 2.dp, y = 42.dp * zoom)
+        )
+        // EN: Show sharps/flats where necessary, including pitch alterations.
+        // ES: Mostrar sostenidos/bemoles cuando la altura requiere alteración.
+        positions.forEach { (fraction, beat) ->
+            beat.notes.forEach { note ->
+                val pitch = tuning.getOrNull(note.string - 1)?.plus(note.fret + 12) ?: return@forEach
+                val semitone = Math.floorMod(pitch, 12)
+                if (semitone in setOf(1, 3, 6, 8, 10)) {
+                    val octave = Math.floorDiv(pitch, 12) - 1
+                    val naturals = intArrayOf(0, 2, 4, 5, 7, 9, 11)
+                    val letter = naturals.indexOfLast { it <= semitone }.coerceAtLeast(0)
+                    val steps = (octave * 7 + letter) - (4 * 7 + 2)
+                    val y = (46f + 48f - steps * 6f) * zoom
+                    val x = maxWidth * (0.10f + fraction * 0.80f)
+                    Text("#", color = accidental, fontSize = 12.sp,
+                        modifier = Modifier.offset(x = x - 19.dp, y = y.dp - 10.dp))
                 }
             }
         }
