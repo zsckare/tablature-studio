@@ -145,7 +145,7 @@ private fun StudioApp() {
                 val currentBar = remember(position, barTicks) {
                     barTicks.indexOfLast { it <= position }.coerceAtLeast(0)
                 }
-                TabCanvas(score.tracks[selectedTrack], zoom, currentBar, player?.isPlaying == true)
+                TabCanvas(score.tracks[selectedTrack], zoom, currentBar, player?.isPlaying == true, position, barTicks.toList())
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -254,7 +254,14 @@ private fun StudioApp() {
  * ES: Utiliza únicamente dibujo nativo Compose, sin WebView.
  */
 @Composable
-private fun TabCanvas(track: Track, zoom: Float, currentMeasure: Int, playing: Boolean) {
+private fun TabCanvas(
+    track: Track,
+    zoom: Float,
+    currentMeasure: Int,
+    playing: Boolean,
+    positionTicks: Long,
+    measureStartTicks: List<Long>
+) {
     val layout = remember(track) { TabLayoutEngine.layout(track) }
     val paper = Color(0xFFFFFEFA)
     val ink = Color(0xFF263242)
@@ -297,7 +304,16 @@ private fun TabCanvas(track: Track, zoom: Float, currentMeasure: Int, playing: B
                             color = Color(0xFF647183), fontSize = 10.sp,
                             letterSpacing = 1.sp
                         )
-                        Spacer(Modifier.height(28.dp))
+                        Spacer(Modifier.height(12.dp))
+                        // EN: Display the actual tuning from the imported track, high to low.
+                        // ES: Mostrar la afinación real de la pista importada, de aguda a grave.
+                        Text(
+                            "TUNING  ·  " + track.tuning.joinToString("  ·  ") { midiPitchLabel(it) },
+                            color = Color(0xFF475569),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(22.dp))
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Column(Modifier.width(54.dp).padding(top = 43.dp)) {
@@ -340,6 +356,34 @@ private fun TabCanvas(track: Track, zoom: Float, currentMeasure: Int, playing: B
                                             ink, Offset(0f, top),
                                             Offset(0f, top + staffHeight.toPx()), 1.dp.toPx()
                                         )
+                                    }
+                                    // EN: Draw one moving playhead, not permanent lines on every note.
+                                    // ES: Dibujar un único cursor móvil, no líneas permanentes en cada nota.
+                                    if (active) {
+                                        val measureStart = measureStartTicks.getOrElse(absolute) { 0L }
+                                        val measureEnd = measureStartTicks.getOrNull(absolute + 1)
+                                            ?: (measureStart + MidiScoreCompiler.PPQ * 4L)
+                                        val duration = (measureEnd - measureStart).coerceAtLeast(1L)
+                                        val fraction = ((positionTicks - measureStart).toFloat() / duration)
+                                            .coerceIn(0f, 1f)
+                                        Canvas(Modifier.fillMaxSize()) {
+                                            // EN: The playhead travels across the same horizontal area as notes.
+                                            // ES: El cursor recorre el mismo espacio horizontal que las notas.
+                                            val x = (0.10f + fraction * 0.80f) * size.width
+                                            val top = 42.dp.toPx() * zoom
+                                            val bottom = staffTop.toPx() + staffHeight.toPx() + 12.dp.toPx()
+                                            drawLine(
+                                                color = selected,
+                                                start = Offset(x, top),
+                                                end = Offset(x, bottom),
+                                                strokeWidth = 2.dp.toPx()
+                                            )
+                                            drawCircle(
+                                                color = selected,
+                                                radius = 4.dp.toPx(),
+                                                center = Offset(x, top)
+                                            )
+                                        }
                                     }
                                     // EN: Conventional treble staff above the tablature, sharing the same measure.
                                     // ES: Pentagrama en clave de sol sobre la tablatura, en el mismo compás.
@@ -503,4 +547,13 @@ private fun StandardStaff(
             }
         }
     }
+}
+
+/**
+ * EN: Convert MIDI open-string pitch to a readable tuning label (e.g. E4, B3).
+ * ES: Convertir el MIDI de cuerda al nombre de afinación (ej. E4, B3).
+ */
+private fun midiPitchLabel(midi: Int): String {
+    val names = arrayOf("C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B")
+    return names[Math.floorMod(midi, 12)] + (Math.floorDiv(midi, 12) - 1)
 }
